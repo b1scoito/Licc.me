@@ -1,0 +1,15 @@
+db.users.createIndex({ username: 1, tag: -1 }, { name: "username", unique: true, background: true });
+db.users.createIndex({ email: 1}, { name: "email", unique: true, background: true });
+db.session.createIndex({ user_id: 1 }, { name: "user_id", background: true });
+db.messages.createIndex({ channel_id: 1 }, { name: "channel_id", background: true });
+db.messages.createIndex({ user_id: 1 }, { name: "user_id", background: true });
+db.dm_channels.createIndex({ client: 1 }, { name: "client", background: true });
+db.dm_channels.createIndex({ recipient: 1 }, { name: "recipient", background: true });
+db.guild_channels.createIndex({ guild_id: 1 }, { name: "guild_id", background: true });
+db.emojis.createIndex({ guild_id: 1 }, { name: "guild_id", background: true });
+db.members.createIndex({ guild_id: 1 }, { name: "guild_id", background: true });
+db.members.createIndex({ member_id: 1 }, { name: "member_id", background: true });
+db.invites.createIndex({ invite: 1 }, { name: "invite", background: true });
+db.invites.createIndex({ guild_id: 1 }, { name: "guild_id", background: true });
+db.log.createIndex({ ip: 1, type: -1 }, { name: "ip", background: true });
+db.log.createIndex({ date: 1 }, { expireAfterSeconds: 600 });

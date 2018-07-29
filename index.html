@@ -1,0 +1,2288 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Licc.me</title>
+    <link rel="stylesheet" type="text/css" href="/assets/index.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.22.1/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sweetalert/2.1.0/sweetalert.min.js"></script>
+    <script>
+    (() => {
+        document.addEventListener("DOMContentLoaded", async () => {
+            let ws, date, count = 0, hello = false, changing = true, fileContent = null, loadingUp = false, scrolledUp = false, windowIsActive = true;
+            const EVERYONE = "0", DM = "dm", DM_CHANNEL = 0, TEXT_CHANNEL = 1, ACKNOWLEDGEMENT = 2;
+            const uploadable = ["image/jpeg", "image/png", "image/gif"];
+            const escape = {
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;"
+            };
+            const display = {
+                menu: false,
+                splash: false,
+                prompt: false,
+                createChannel: false,
+                emojiPicker: false
+            };
+            const loading = document.getElementById("loading");
+            loading.style.display = "block";
+            const stylesheet = document.getElementsByTagName("link")[0];
+            const click = document.getElementsByTagName("nav")[0].getElementsByClassName("avatar")[0];
+            const menu = document.getElementById("menu");
+            const showChannels = document.getElementById("channels").getElementsByTagName("button")[0];
+            const showPending = document.getElementById("channels").getElementsByTagName("button")[1];
+            const channelsIndicator = document.getElementById("channels").getElementsByClassName("dot")[0];
+            const pendingIndicator = document.getElementById("channels").getElementsByClassName("dot")[1];
+            const friends = document.getElementById("friends");
+            const pending = document.getElementById("pending");
+            const search = document.getElementById("search");
+            const messages = document.getElementById("messages");
+            const textarea = document.getElementsByTagName("textarea")[0];
+            const emojiSearch = document.getElementById("emoji-search");
+            const emojiPicker = document.getElementById("emoji-picker");
+            const emojis = emojiPicker.getElementsByTagName("div")[1];
+            const splash = document.getElementById("splash");
+            const prompt = document.getElementById("prompt");
+            const choose = document.getElementById("choose");
+            const action = document.getElementById("action");
+            const createChannel = document.getElementById("create-channel");
+            const control = document.getElementById("control");
+            const emojisManager = document.getElementById("emojis").getElementsByTagName("div")[1];
+            const invites = document.getElementById("invites").getElementsByTagName("div")[1];
+            const settings = document.getElementById("settings");
+            const changeFocus = (a, b) => {
+                a.classList.remove("focusout");
+                a.classList.add("focus");
+                b.classList.remove("focus");
+                b.classList.add("focusout");
+            };
+            const sound = () => {
+                const promise = document.getElementById("audio").play();
+                if (promise !== undefined) {
+                    promise.then(() => {}).catch(error => {});
+                }
+            };
+            const resetPrompt = () => {
+                choose.classList.replace("slideleft", "slideright");
+                action.classList.replace("slideleft", "slideright");
+                document.getElementById("action-create-guild").style.display = "none";
+                document.getElementById("action-join-guild").style.display = "none";
+            };
+            if (window.localStorage.getItem("night")) {
+                stylesheet.setAttribute("href", "/assets/night.css");
+            }
+            Element.prototype.scrollUp = function () {
+                this.scrollTop = 0;
+            };
+            Element.prototype.scrollDown = function () {
+                this.scrollTop = this.scrollHeight - this.clientHeight;
+            };
+            String.prototype.escape = function () {
+                return this.replace(/[&<>]/g, function (match) {
+                    return escape[match] || match;
+                });
+            };
+            String.prototype.parseEmoji = function () {
+                return this.replace(/:([^:]+):/g, function (match, p1) {
+                    return client.emojis.has(p1) ? `<!${client.emojis.get(p1).id}>` : `:${p1}:`;
+                });
+            };
+            String.prototype.toEmoji = function () {
+                return this.replace(/&lt;!([a-z0-9]{16})&gt;/g, function (match, p1) {
+                    return `<img class="emoji" src="/emojis/${p1}">`;
+                });
+            };
+            String.prototype.resolveMentions = function () {
+                return this.replace(/(@.{1,64}#[0-9]{4})|(@[everyone|here])/g, function (match) {
+                    return `<span class="mention">${match}</span>`;
+                });
+            };
+            Map.prototype.first = function () {
+                return this.values().next().value;
+            };
+            class Http {
+                static async get(url) {
+                    return new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open("GET", url, true);
+                        xhr.onreadystatechange = () => {
+                            if (xhr.readyState === XMLHttpRequest.DONE) {
+                                if (xhr.status === 200) {
+                                    const response = JSON.parse(xhr.responseText);
+                                    if (response.status) {
+                                        resolve(response);
+                                    } else {
+                                        reject(response.error);
+                                    }
+                                } else if (xhr.status === 503) {
+                                    reject("Rate limit");
+                                } else {
+                                    reject("Network error");
+                                }
+                            }
+                        };
+                        xhr.send();
+                    });
+                }
+                static async post(url, data) {
+                    return new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open("POST", url, true);
+                        xhr.setRequestHeader("Content-type", "application/json");
+                        xhr.onreadystatechange = () => {
+                            if (xhr.readyState === XMLHttpRequest.DONE) {
+                                if (xhr.status === 200) {
+                                    const response = JSON.parse(xhr.responseText);
+                                    if (response.status) {
+                                        resolve(response);
+                                    } else {
+                                        reject(response.error);
+                                    }
+                                } else if (xhr.status === 503) {
+                                    console.clear();
+                                    reject("Rate limit");
+                                } else {
+                                    reject("Network error");
+                                }
+                            }
+                        };
+                        xhr.send(data);
+                    });
+                }
+            }
+            class Client {
+                constructor() {
+                    this.guilds = new Map();
+                    this.emojis = new Map();
+                    this.dmChannels = new Map();
+                    this.textChannels = new Map();
+                    this.pendingChannels = new Map();
+                    this.currentDMChannelId = EVERYONE;
+                    this.currentGuildId = DM;
+                    this.currentChannelType = DM_CHANNEL;
+                    this.currentTextChannelId = {};
+                    this.user = {};
+                }
+                createUniqueEmojiName(name) {
+                    let key = name, i = 0;
+                    while (client.emojis.has(key)) {
+                        i++;
+                        key = `${name}-${i}`;
+                    }
+                    return key;
+                }
+            }
+            const client = new Client();
+            class Guild {
+                constructor(guild, options = { override: false, position: 1 }) {
+                    this.id = guild.id;
+                    if (!options.override) {
+                        this.setup(guild, options.position);
+                    }
+                }
+                setup(guild, position) {
+                    this.name = guild.name;
+                    this.icon = guild.icon;
+                    this.owner = guild.owner;
+                    this.channels = new Map();
+                    this.members = new Map();
+                    this.emojis = guild.emojis;
+                    for (let emoji of this.emojis) {
+                        client.emojis.set(client.createUniqueEmojiName(emoji.name), {
+                            id: emoji.id,
+                            name: emoji.name
+                        });
+                    }
+                    this.createCollection();
+                    if (this.owner) {
+                        this.createControlButton();
+                        this.createNewChannelButton();
+                    } else {
+                        this.createLeaveButton();
+                    }
+                    const length = guild.channels.length;
+                    for (let i = 0; i < length; i++) {
+                        new TextChannel(guild.channels[i], this, i > 0);
+                    }
+                    const div = document.createElement("div"); div.classList.add("guild"); div.style.backgroundImage = `url("${this.icon}")`;
+                    const bar = document.createElement("div"); bar.classList.add("bar");
+                    div.appendChild(bar);
+                    div.addEventListener("click", () => {
+                        this.change();
+                    });
+                    if (position < 0) {
+                        document.getElementById("guilds").insertBefore(div, document.getElementById("guilds").getElementsByClassName("guild")[1]);
+                    } else {
+                        document.getElementById("guilds").insertBefore(div, document.getElementById("guild-add"));
+                    }
+                    this.clickable = div;
+                    client.guilds.set(this.id, this);
+                }
+                createCollection() {
+                    const collection = document.createElement("div"); collection.classList.add("collection");
+                    const header = document.createElement("div"); header.classList.add("header");
+                    const p = document.createElement("p"); p.textContent = this.name;
+                    const type = document.createElement("p"); type.classList.add("type");
+                    header.appendChild(p);
+                    collection.appendChild(header);
+                    collection.appendChild(type);
+                    document.getElementById("collections").appendChild(collection);
+                    this.collection = collection;
+                }
+                createControlButton() {
+                    const button = document.createElement("div"); button.classList.add("btn-control");
+                    button.addEventListener("click", () => {
+                        for (let btn of control.getElementsByClassName("selected")) {
+                            btn.classList.remove("selected");
+                        }
+                        document.getElementById("btn-about").classList.add("selected");
+                        while (emojisManager.firstChild) {
+                            emojisManager.removeChild(emojisManager.firstChild);
+                        }
+                        while (invites.firstChild) {
+                            invites.removeChild(invites.firstChild);
+                        }
+                        const fragment = document.createDocumentFragment();
+                        for (let emojiArray of this.emojis) {
+                            const id = emojiArray.id;
+                            const div = document.createElement("div"); div.classList.add("emoji");
+                            const img = document.createElement("div"); img.classList.add("img"); img.style.backgroundImage = `url("/emojis/${emojiArray.id}")`;
+                            const input = document.createElement("input"); input.value = `${emojiArray.name}`;
+                            input.addEventListener("blur", async () => {
+                                const name = input.value;
+                                if (name.length > 0 && name !== emojiArray.name) {
+                                    try {
+                                        await Http.post(`/guilds/${this.id}/emoji/${id}/update`, JSON.stringify({
+                                            name: name
+                                        }));
+                                        for (let [key, emoji] of client.emojis) {
+                                            if (emoji.id === id) {
+                                                client.emojis.delete(key);
+                                                client.emojis.set(client.createUniqueEmojiName(name), emoji);
+                                                break;
+                                            }
+                                        }
+                                        for (let emoji of this.emojis) {
+                                            if (emoji.id === id) {
+                                                emoji.name = name;
+                                            }
+                                        }
+                                    } catch (error) {
+                                        swal({
+                                            title: "Oops",
+                                            text: error,
+                                            icon: "error"
+                                        });
+                                    }
+                                }
+                            });
+                            const del = document.createElement("button");
+                            del.addEventListener("click", async () => {
+                                try {
+                                    await Http.post(`/guilds/${this.id}/emoji/${id}/delete`, null);
+                                    emojisManager.removeChild(div);
+                                } catch (error) {
+                                    swal({
+                                        title: "Oops",
+                                        text: error,
+                                        icon: "error"
+                                    });
+                                }
+                            });
+                            div.appendChild(img);
+                            div.appendChild(input);
+                            div.appendChild(del);
+                            fragment.appendChild(div);
+                        }
+                        emojisManager.appendChild(fragment);
+                        document.getElementById("overview").getElementsByClassName("icon")[0].style.backgroundImage = `url("${this.icon}")`;
+                        document.getElementById("update-guild").getElementsByTagName("input")[0].value = this.name;
+                        document.getElementById("invites").style.display = "none";
+                        document.getElementById("emojis").style.display = "none";
+                        document.getElementById("about").style.display = "block";
+                        control.classList.remove("popout");
+                        control.classList.add("pop");
+                        menu.style.display = "none";
+                        display.menu = false;
+                    });
+                    this.collection.appendChild(button);
+                }
+                createNewChannelButton() {
+                    const button = document.createElement("div"); button.classList.add("btn-create-channel");
+                    this.collection.appendChild(button);
+                }
+                createLeaveButton() {
+                    const button = document.createElement("button"); button.classList.add("btn-leave");
+                    button.addEventListener("click", () => {
+                        swal({
+                            title: "Are you sure?",
+                            text: `This will remove you from the community ${this.name}. You can rejoin with an invite.`,
+                            icon: "warning",
+                            buttons: true,
+                            dangerMode: true
+                        }).then(async ok => {
+                            if (ok) {
+                                try {
+                                    await Http.post(`guilds/${this.id}/leave`, null);
+                                } catch (error) {
+                                    swal({
+                                        title: "Oops",
+                                        text: error,
+                                        icon: "error"
+                                    });
+                                }
+                            }
+                        });
+                    });
+                    this.collection.appendChild(button);
+                }
+                async change() {
+                    if (!changing) {
+                        if (this.id !== client.currentGuildId) {
+                            changing = true;
+                            loading.style.display = "block";
+                            textarea.setAttribute("disabled", "disabled");
+                            const channel = client.currentTextChannelId[this.id] ? this.channels.get(client.currentTextChannelId[this.id]) : this.channels.first();
+                            client.guilds.get(client.currentGuildId).clickable.classList.remove("selected");
+                            this.clickable.classList.add("selected");
+                            channel.clickable.classList.add("selected");
+                            if (client.currentGuildId !== DM) {
+                                client.guilds.get(client.currentGuildId).collection.style.display = "none";
+                                client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).viewable.style.display = "none";
+                            }
+                            this.collection.style.display = "block";
+                            client.dmChannels.get(client.currentDMChannelId).viewable.style.display = "none";
+                            channel.viewable.style.display = "block";
+                            document.getElementById("dm").style.display = "none";
+                            document.getElementById("guild").style.display = "block";
+                            if (!channel.viewable.hasChildNodes() && !channel.allLoaded) {
+                                await channel.fetchMessages();
+                            }
+                            messages.scrollDown();
+                            textarea.removeAttribute("disabled");
+                            loading.style.display = "none";
+                            textarea.placeholder = `Message #${channel.name}`;
+                            textarea.removeAttribute("disabled");
+                            loading.style.display = "none";
+                            client.currentGuildId = this.id;
+                            client.currentTextChannelId[this.id] = channel.id;
+                            client.currentChannelType = TEXT_CHANNEL;
+                            setTimeout(function () {
+                                changing = false;
+                            }, 100);
+                        }
+                    }
+                }
+            }
+            class Channel {
+                constructor() {
+                    this.lastMessageId = null;
+                    this.allLoaded = false;
+                }
+                createMessage(message) {
+                    const div = document.createElement("div"); div.classList.add("message");
+                    const img = document.createElement("div"); img.classList.add("avatar"); img.style.backgroundImage = `url("${message.author.avatar}")`;
+                    const content = document.createElement("div"); content.classList.add("content");
+                    const p = document.createElement("p"); p.classList.add("splash"); p.textContent = message.author.username;
+                    const span = document.createElement("span"); span.textContent = `#${message.author.tag}`;
+                    const h6 = document.createElement("h6"); h6.textContent = moment(message.date).format("LLL");
+                    const pre = document.createElement("pre"); pre.innerHTML = message.text.escape().replace(/(?:https?:\/\/){1}(?:www\.)?[a-z0-9]+(?:[\-\.][a-z0-9]+)*\.[a-z]{2,}(?::[0-9]+)?(?:\/\S*)?/, "<a href='$&' target='_blank'>$&</a>").toEmoji();
+                    p.appendChild(span);
+                    content.appendChild(p);
+                    content.appendChild(h6);
+                    content.appendChild(pre);
+                    div.appendChild(img);
+                    div.appendChild(content);
+                    return div;
+                }
+            }
+            class DMChannel extends Channel {
+                constructor(id, recipient, unread = false, options = { override: false, position: 1 }) {
+                    super();
+                    this.id = id;
+                    this.recipient = recipient;
+                    this.unread = unread;
+                    if (!options.override) {
+                        this.setup(options.position);
+                    }
+                }
+                setup(position) {
+                    const div = document.createElement("div"); div.classList.add("channel");
+                    const img = document.createElement("div"); img.classList.add("avatar"); img.style.backgroundImage = `url("${this.recipient.avatar}")`;
+                    const p = document.createElement("p"); p.textContent = this.recipient.username;
+                    const span = document.createElement("span"); span.textContent = `#${this.recipient.tag}`;
+                    const dot = document.createElement("div"); dot.classList.add("dot");
+                    if (this.unread) {
+                        dot.style.opacity = "1";
+                    }
+                    p.appendChild(span);
+                    div.appendChild(img);
+                    div.appendChild(p);
+                    div.appendChild(dot);
+                    div.addEventListener("click", () => {
+                        this.change();
+                    });
+                    friends.appendChild(div);
+                    const message = document.createElement("div"); messages.appendChild(message);
+                    this.viewable = message;
+                    if (position < 0) {
+                        friends.insertBefore(div, client.dmChannels.get(EVERYONE).clickable.nextSibling);
+                    } else {
+                        friends.appendChild(div);
+                    }
+                    this.clickable = div;
+                    client.dmChannels.set(this.id, this);
+                }
+                async change() {
+                    if (!changing) {
+                        changing = true;
+                        loading.style.display = "block";
+                        textarea.setAttribute("disabled", "disabled");
+                        while (search.firstChild) {
+                            search.removeChild(search.firstChild);
+                        }
+                        search.style.display = "none";
+                        pending.style.display = "none";
+                        friends.style.display = "block";
+                        client.dmChannels.get(client.currentDMChannelId).clickable.classList.remove("selected");
+                        this.clickable.classList.add("selected");
+                        this.clickable.getElementsByClassName("dot")[0].style.opacity = "0";
+                        client.dmChannels.get(client.currentDMChannelId).viewable.style.display = "none";
+                        this.viewable.style.display = "block";
+                        textarea.placeholder = this.id !== EVERYONE ? `Message @${this.recipient.username}#${this.recipient.tag}` : `Message @${this.recipient.username}`;
+                        if (!this.viewable.hasChildNodes() && !this.allLoaded) {
+                            await this.fetchMessages();
+                        }
+                        messages.scrollDown();
+                        textarea.removeAttribute("disabled");
+                        loading.style.display = "none";
+                        client.currentDMChannelId = this.id;
+                        client.currentChannelType = DM_CHANNEL;
+                        if (this.unread) {
+                            this.unread = false;
+                            ws.send(JSON.stringify({
+                                type: ACKNOWLEDGEMENT,
+                                channel_id: this.id
+                            }));
+                        }
+                        setTimeout(() => {
+                            changing = false;
+                        }, 100);
+                    }
+                }
+                async fetchMessages() {
+                    const url = this.lastMessageId === null ? `/channels/${this.id}/messages` : `/channels/${this.id}/messages?id=${this.lastMessageId}`;
+                    try {
+                        const response = await Http.get(url);
+                        const messageIds = [];
+                        if (response.messages.length > 0) {
+                            const fragment = document.createDocumentFragment();
+                            for (let message of response.messages) {
+                                fragment.insertBefore(this.createMessage(message), fragment.firstChild);
+                                messageIds.push(message.id);
+                            }
+                            this.viewable.insertBefore(fragment, this.viewable.firstChild);
+                            this.lastMessageId = messageIds[messageIds.length - 1];
+                        } else if (response.messages.length === 0) {
+                            this.allLoaded = true;
+                        }
+                        return messageIds;
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+            }
+            class TextChannel extends Channel {
+                constructor(channel, guild, deletable = false) {
+                    super();
+                    this.id = channel.id;
+                    this.name = channel.name;
+                    this.guild = guild;
+                    this.setup(deletable);
+                }
+                setup(deletable) {
+                    const div = document.createElement("div"); div.classList.add("guild-channel");
+                    const p = document.createElement("p"); p.textContent = this.name;
+                    div.appendChild(p);
+                    if (deletable && this.guild.owner) {
+                        const button = document.createElement("button");
+                        button.addEventListener("click", async () => {
+                            swal({
+                                title: "Confirm?",
+                                text: `Are you sure you want to permanently delete ${this.name}? This will remove all history associated with it.`,
+                                icon: "warning",
+                                buttons: true,
+                                dangerMode: true
+                            }).then(async ok => {
+                                if (ok) {
+                                    try {
+                                        await Http.post(`/guilds/${this.guild.id}/channel/${this.id}/delete`, null);
+                                    } catch (error) {
+                                        swal({
+                                            title: "Oops",
+                                            text: error,
+                                            icon: "error"
+                                        });
+                                    }
+                                }
+                            });
+                        });
+                        div.appendChild(button);
+                    }
+                    div.addEventListener("click", () => {
+                        this.change();
+                    });
+                    const message = document.createElement("div"); messages.appendChild(message);
+                    this.guild.collection.appendChild(div);
+                    this.guild.channels.set(this.id, this);
+                    this.clickable = div;
+                    this.viewable = message;
+                    client.textChannels.set(this.id, this);
+                }
+                delete() {
+                    this.guild.channels.delete(this.id);
+                    client.textChannels.delete(this.id);
+                }
+                async change() {
+                    if (!changing) {
+                        if (this.id !== client.currentTextChannelId[client.currentGuildId]) {
+                            changing = true;
+                            loading.style.display = "block";
+                            textarea.setAttribute("disabled", "disabled");
+                            client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).clickable.classList.remove("selected");
+                            this.clickable.classList.add("selected");
+                            client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).viewable.style.display = "none";
+                            this.viewable.style.display = "block";
+                            textarea.placeholder = `Message #${this.name}`;
+                            if (!this.viewable.hasChildNodes() && !this.allLoaded) {
+                                await this.fetchMessages();
+                            }
+                            messages.scrollDown();
+                            textarea.removeAttribute("disabled");
+                            loading.style.display = "none";
+                            client.currentTextChannelId[client.currentGuildId] = this.id;
+                            client.currentChannelType = TEXT_CHANNEL;
+                            setTimeout(() => {
+                                changing = false;
+                            }, 100);
+                        }
+                    }
+                }
+                async fetchMessages() {
+                    const url = this.lastMessageId === null ? `/guilds/${this.guild.id}/${this.id}/messages` : `/guilds/${this.guild.id}/${this.id}/messages?id=${this.lastMessageId}`;
+                    try {
+                        const response = await Http.get(url);
+                        const messageIds = [];
+                        if (response.messages.length > 0) {
+                            const fragment = document.createDocumentFragment();
+                            for (let message of response.messages) {
+                                fragment.insertBefore(this.createMessage(message), fragment.firstChild);
+                                messageIds.push(message.id);
+                            }
+                            this.viewable.insertBefore(fragment, this.viewable.firstChild);
+                            this.lastMessageId = messageIds[messageIds.length - 1];
+                        } else if (response.messages.length === 0) {
+                            this.allLoaded = true;
+                        }
+                        return messageIds;
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+            }
+            class PendingChannel extends Channel {
+                constructor(channel) {
+                    super();
+                    this.id = channel.id;
+                    this.recipient = channel.recipient;
+                    this.setup(channel.acceptable);
+                }
+                setup(acceptable) {
+                    const div = document.createElement("div"); div.classList.add("channel", "pending");
+                    const img = document.createElement("div"); img.classList.add("avatar"); img.style.backgroundImage = `url("${this.recipient.avatar}")`;
+                    const p = document.createElement("p"); p.textContent = this.recipient.username;
+                    const span = document.createElement("span"); span.textContent = `#${this.recipient.tag}`;
+                    const br = document.createElement("br");
+                    const button = document.createElement("button");
+                    p.appendChild(span);
+                    div.appendChild(img);
+                    div.appendChild(p);
+                    div.appendChild(br);
+                    div.appendChild(br);
+                    if (!acceptable) {
+                        button.classList.add("cancel");
+                        button.textContent = "Cancel";
+                        button.addEventListener("click", () => {
+                            this.cancel();
+                        });
+                        div.appendChild(button);
+                    } else {
+                        button.classList.add("cancel");
+                        button.textContent = "Cancel";
+                        button.addEventListener("click", () => {
+                            this.cancel();
+                        });
+                        const button2 = document.createElement("button");
+                        button2.classList.add("accept");
+                        button2.textContent = "Accept";
+                        button2.addEventListener("click", () => {
+                            this.accept();
+                        });
+                        div.appendChild(button2);
+                        div.appendChild(button);
+                    }
+                    pending.appendChild(div);
+                    this.removable = div;
+                    client.pendingChannels.set(this.id, this);
+                }
+                async accept() {
+                    try {
+                        await Http.post(`/users/accept/${this.id}`, null);
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+                async cancel() {
+                    try {
+                        await Http.post(`/users/cancel/${this.id}`, null);
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+            }
+            const everyone = new DMChannel(EVERYONE, { username: "everyone" }, false, { override: true });
+            everyone.clickable = document.getElementById("dm-everyone");
+            everyone.viewable = document.getElementById("chat-everyone");
+            everyone.clickable.addEventListener("click", () => {
+                everyone.change();
+            });
+            client.dmChannels.set(EVERYONE, everyone);
+            const dm = new Guild({ id: DM }, { override: true });
+            dm.clickable = document.getElementById("guild-dm");
+            dm.clickable.addEventListener("click", function () {
+                if (!changing && !this.classList.contains("selected")) {
+                    textarea.setAttribute("disabled", "disabled");
+                    client.guilds.get(client.currentGuildId).clickable.classList.remove("selected");
+                    this.classList.add("selected");
+                    document.getElementById("guild").style.display = "none";
+                    document.getElementById("dm").style.display = "block";
+                    client.guilds.get(client.currentGuildId).collection.style.display = "none";
+                    client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).viewable.style.display = "none";
+                    client.dmChannels.get(client.currentDMChannelId).viewable.style.display = "block";
+                    messages.scrollDown();
+                    textarea.placeholder = client.currentDMChannelId !== EVERYONE ? `Message @${client.dmChannels.get(client.currentDMChannelId).recipient.username}#${client.dmChannels.get(client.currentDMChannelId).recipient.tag}` : `Message @${client.dmChannels.get(client.currentDMChannelId).recipient.username}`;
+                    textarea.removeAttribute("disabled");
+                    client.currentGuildId = DM;
+                    client.currentChannelType = DM_CHANNEL;
+                    setTimeout(() => {
+                        changing = false;
+                    }, 100);
+                }
+            });
+            client.guilds.set(DM, dm);
+            window.addEventListener("focus", () => {
+                windowIsActive = true;
+                if (client.currentChannelType === DM_CHANNEL && client.currentDMChannelId !== EVERYONE) {
+                    const channel = client.dmChannels.get(client.currentDMChannelId);
+                    if (channel.unread) {
+                        channel.unread = false;
+                        ws.send(JSON.stringify({
+                            type: ACKNOWLEDGEMENT,
+                            channel_id: client.currentDMChannelId
+                        }));
+                    }
+                }
+            });
+            window.addEventListener("blur", () => {
+                windowIsActive = false;
+            });
+            const socket = (reconnect = false) => {
+                ws = new WebSocket(`wss://${window.location.hostname}/chat`);
+                ws.addEventListener("open", () => {
+                    console.clear();
+                    if (window.interval) {
+                        clearInterval(window.interval);
+                        delete window.interval;
+                    }
+                    ws.send(JSON.stringify({
+                        type: reconnect ? "reconnect" : "hello"
+                    }));
+                    ws.addEventListener("message", async event => {
+                        const response = JSON.parse(event.data);
+                        if (response.status) {
+                            switch (response.type) {
+                                case "MESSAGE":
+                                {
+                                    let channel, messageIds, loadedOlder = false;
+                                    const message = response;
+                                    const { guild_id, channel_id } = message;
+                                    const isEveryone = channel_id === EVERYONE;
+                                    const isGuildChannel = guild_id ? true : false;
+                                    if (isGuildChannel) {
+                                        channel = client.textChannels.get(channel_id);
+                                        if (channel_id !== client.currentTextChannelId[client.currentGuildId]) {
+                                            if (!channel.viewable.hasChildNodes() && !channel.allLoaded) {
+                                                messageIds = await channel.fetchMessages();
+                                                loadedOlder = true;
+                                            }
+                                        }
+                                    } else {
+                                        if (!windowIsActive && !isEveryone) {
+                                            sound();
+                                        }
+                                        channel = client.dmChannels.get(channel_id);
+                                        if (channel_id === client.currentDMChannelId) {
+                                            if (windowIsActive && !scrolledUp && !isEveryone && message.author.id !== client.user.id) {
+                                                ws.send(JSON.stringify({
+                                                    type: ACKNOWLEDGEMENT,
+                                                    channel_id: channel_id
+                                                }));
+                                            } else if (message.author.id !== client.user.id) {
+                                                channel.unread = true;
+                                            }
+                                        } else {
+                                            if (!channel.viewable.hasChildNodes() && !channel.allLoaded) {
+                                                messageIds = await channel.fetchMessages();
+                                                loadedOlder = true;
+                                            }
+                                            channel.clickable.getElementsByClassName("dot")[0].style.opacity = "1";
+                                            if (!isEveryone && message.author.id !== client.user.id) {
+                                                sound();
+                                                channel.unread = true;
+                                            }
+                                        }
+                                    }
+                                    if (!loadedOlder || !messageIds.includes(message.id)) {
+                                        channel.viewable.appendChild(channel.createMessage(message));
+                                        if (isGuildChannel) {
+                                            if (channel_id === client.currentTextChannelId[client.currentGuildId]) {
+                                                if (!scrolledUp) {
+                                                    messages.scrollDown();
+                                                }
+                                            }
+                                        } else {
+                                            if (channel_id === client.currentDMChannelId) {
+                                                if (!scrolledUp) {
+                                                    messages.scrollDown();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                                case "DM_ACCEPT":
+                                {
+                                    const channel = client.pendingChannels.get(response.channel_id);
+                                    new DMChannel(channel.id, channel.recipient, false, { position: -1 });
+                                    pending.removeChild(channel.removable);client.pendingChannels.delete(channel.id);
+                                    if (showChannels.classList.contains("focusout")) {
+                                        channelsIndicator.style.opacity = "1";
+                                    }
+                                    if (client.pendingChannels.size === 0) {
+                                        pendingIndicator.style.opacity = "0";
+                                    }
+                                }
+                                break;
+                                case "DM_CANCEL":
+                                {
+                                    pending.removeChild(client.pendingChannels.get(response.channel_id).removable);
+                                    client.pendingChannels.delete(response.channel_id);
+                                    if (client.pendingChannels.size === 0) {
+                                        pendingIndicator.style.opacity = "0";
+                                    }
+                                }
+                                break;
+                                case "DM_CREATE":
+                                {
+                                    new PendingChannel(response.channel);
+                                    if (showPending.classList.contains("focusout")) {
+                                        pendingIndicator.style.opacity = "1";
+                                    }
+                                }
+                                break;
+                                case "GUILD_CREATE":
+                                {
+                                    new Guild(response.guild, { position: -1 });
+                                }
+                                break;
+                                case "GUILD_UPDATE":
+                                {
+                                    const guild = client.guilds.get(response.guild.id);
+                                    guild.name = response.guild.name;
+                                    guild.icon = response.guild.icon;
+                                    guild.clickable.style.backgroundImage = `url("${response.guild.icon}")`;
+                                    guild.collection.getElementsByClassName("header")[0].getElementsByTagName("p")[0].textContent = response.guild.name;
+                                }
+                                break;
+                                case "GUILD_DELETE":
+                                {
+                                    const guild = client.guilds.get(response.guild_id);
+                                    if (guild.id === client.currentGuildId) {
+                                        if (control.classList.contains("pop")) {
+                                            control.classList.replace("pop", "popout");
+                                        }
+                                        guild.clickable.classList.remove("selected");
+                                        client.guilds.get(DM).clickable.classList.add("selected");
+                                        document.getElementById("guild").style.display = "none";
+                                        document.getElementById("dm").style.display = "block";
+                                        client.dmChannels.get(client.currentDMChannelId).viewable.style.display = "block";
+                                        messages.scrollDown();
+                                        textarea.placeholder = client.currentDMChannelId !== EVERYONE ? `Message @${client.dmChannels.get(client.currentDMChannelId).recipient.username}#${client.dmChannels.get(client.currentDMChannelId).recipient.tag}` : `Message @${client.dmChannels.get(client.currentDMChannelId).recipient.username}`;
+                                        client.currentGuildId = DM;
+                                        client.currentChannelType = DM_CHANNEL;
+                                    }
+                                    for (let [id, channel] of guild.channels) {
+                                        client.textChannels.delete(id);
+                                        messages.removeChild(channel.viewable);
+                                    }
+                                    document.getElementById("collections").removeChild(guild.collection);
+                                    document.getElementById("guilds").removeChild(guild.clickable);
+                                    client.guilds.delete(guild.id);
+                                    delete client.currentTextChannelId[guild.id];
+                                }
+                                break;
+                                case "GUILD_CHANNEL_CREATE":
+                                {
+                                    new TextChannel(response.channel, client.guilds.get(response.guild_id), true);
+                                }
+                                break;
+                                case "GUILD_CHANNEL_DELETE":
+                                {
+                                    const guild = client.guilds.get(response.guild_id);
+                                    messages.removeChild(guild.channels.get(response.channel_id).viewable);
+                                    guild.collection.removeChild(guild.channels.get(response.channel_id).clickable);
+                                    guild.channels.get(response.channel_id).delete();
+                                    if (response.channel_id === client.currentTextChannelId[response.guild_id]) {
+                                        const channel = client.guilds.get(response.guild_id).channels.first();
+                                        channel.clickable.classList.add("selected");
+                                        channel.viewable.style.display = "block";
+                                        messages.scrollDown();
+                                        textarea.placeholder = `Message #${channel.name}`;
+                                        client.currentTextChannelId[response.guild_id] = channel.id;
+                                    }
+                                }
+                                break;
+                                case "GUILD_EMOJI_CREATE":
+                                {
+                                    client.emojis.set(client.createUniqueEmojiName(response.emoji.name), {
+                                        id: response.emoji.id,
+                                        name: response.emoji.name
+                                    });
+                                    client.guilds.get(response.guild_id).emojis.push(response.emoji);
+                                }
+                                break;
+                                case "GUILD_EMOJI_DELETE":
+                                {
+                                    for (let [key, emoji] of client.emojis) {
+                                        if (emoji.id === response.emoji_id) {
+                                            client.emojis.delete(key);
+                                            break;
+                                        }
+                                    }
+                                    client.guilds.get(response.guild_id).emojis = client.guilds.get(response.guild_id).emojis.filter(x => {
+                                        return x.id !== response.emoji_id
+                                    });
+                                }
+                                break;
+                                case "GUILDS":
+                                {
+                                    const reference = document.getElementById("guilds").getElementsByClassName("guild")[1];
+                                    for (let guild of response.guilds) {
+                                        new Guild(guild);
+                                    }
+                                }
+                                break;
+                                case "DM_CHANNELS":
+                                {
+                                    const array = response.channels;
+                                    let i = 1;
+                                    while (i < array.length) {
+                                        let j = i;
+                                        while (j > 0 && array[j - 1].recipient.username.toLowerCase() > array[j].recipient.username.toLowerCase()) {
+                                            let tmp = array[j - 1];
+                                            array[j - 1] = array[j];
+                                            array[j] = tmp;
+                                            j--;
+                                        }
+                                        i++;
+                                    }
+                                    for (let channel of array) {
+                                        new DMChannel(channel.id, channel.recipient, channel.unread);
+                                    }
+                                }
+                                break;
+                                case "PENDING_REQUESTS":
+                                {
+                                    for (let channel of response.pending) {
+                                        new PendingChannel(channel);
+                                    }
+                                    pendingIndicator.style.opacity = "1";
+                                }
+                                break;
+                                case "HELLO":
+                                {
+                                    if (!hello) {
+                                        client.user.id = response.user_id;
+                                        document.getElementsByTagName("nav")[0].getElementsByClassName("avatar")[0].style.backgroundImage = `url("${response.avatar}")`;
+                                        document.getElementById("account").getElementsByClassName("avatar")[0].style.backgroundImage = `url("${response.avatar}")`;
+                                        document.getElementById("username").textContent = `${response.username}#${response.tag}`;
+                                        document.getElementById("email").textContent = response.email;
+                                        document.getElementById("change-username").getElementsByTagName("input")[1].value = response.tag;
+                                        await everyone.fetchMessages();
+                                        loading.style.display = "none";
+                                        everyone.viewable.style.display = "block";
+                                        messages.scrollDown();
+                                        textarea.removeAttribute("disabled");
+                                        changing = false;
+                                        hello = true;
+                                    }
+                                }
+                                break;
+                            }
+                        } else {
+                            swal({
+                                title: "Oops",
+                                text: response.error,
+                                icon: "error"
+                            });
+                        }
+                    });
+                });
+                ws.addEventListener("close", () => {
+                    if (!window.interval) {
+                        window.interval = setInterval(() => {
+                            socket(true);
+                        }, 5000);
+                    }
+                });
+            };
+            socket();
+            messages.addEventListener("scroll", async function () {
+                if (this.scrollTop === 0) {
+                    if (!changing && !loadingUp) {
+                        try {
+                            switch (client.currentChannelType) {
+                                case DM_CHANNEL:
+                                {
+                                    if (!client.dmChannels.get(client.currentDMChannelId).allLoaded) {
+                                        loadingUp = true;
+                                        const scroll = this.scrollHeight;
+                                        loading.style.display = "block";
+                                        await client.dmChannels.get(client.currentDMChannelId).fetchMessages();
+                                        loading.style.display = "none";
+                                        this.scrollTop = this.scrollHeight - scroll;
+                                        scrolledUp = true;
+                                        loadingUp = false;
+                                    }
+                                }
+                                break;
+                                case TEXT_CHANNEL:
+                                {
+                                    if (!client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).allLoaded) {
+                                        loadingUp = true;
+                                        const scroll = this.scrollHeight;
+                                        loading.style.display = "block";
+                                        await client.textChannels.get(client.currentTextChannelId[client.currentGuildId]).fetchMessages();
+                                        loading.style.display = "none";
+                                        this.scrollTop = this.scrollHeight - scroll;
+                                        scrolledUp = true;
+                                        loadingUp = false;
+                                    }
+                                }
+                                break;
+                            }
+                        } catch (error) {
+                            loading.style.display = "none";
+                            this.scrollTop = this.scrollHeight - scroll;
+                            scrolledUp = true;
+                            loadingUp = false;
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    }
+                } else if (this.scrollHeight - this.scrollTop === this.clientHeight) {
+                    scrolledUp = false;
+                }
+            });
+            textarea.addEventListener("keydown", async function (e) {
+                if (!e.shiftKey && e.key === "Enter") {
+                    e.preventDefault();
+                    const text = this.value.trim().parseEmoji();
+                    this.value = "";
+                    if (text.length > 0) {
+                        if (text.length <= 1024) {
+                            if (!date || Math.floor((Date.now() - date) / 1000) > 10) {
+                                date = Date.now();
+                                count = 1;
+                            } else {
+                                count++;
+                            }
+                            if (count < 10) {
+                                try {
+                                    if (client.currentChannelType === DM_CHANNEL) {
+                                        ws.send(JSON.stringify({
+                                            type: DM_CHANNEL,
+                                            channel_id: client.currentDMChannelId,
+                                            text: text
+                                        }));
+                                    } else if (client.currentChannelType === TEXT_CHANNEL) {
+                                        ws.send(JSON.stringify({
+                                            type: TEXT_CHANNEL,
+                                            guild_id: client.currentGuildId,
+                                            channel_id: client.currentTextChannelId[client.currentGuildId],
+                                            text: text
+                                        }));
+                                    }
+                                } catch (error) {
+                                    swal({
+                                        title: "Oops",
+                                        text: error,
+                                        icon: "error"
+                                    });
+                                }
+                            } else {
+                                swal({
+                                    title: "Oops",
+                                    text: "Rate limit",
+                                    icon: "error"
+                                });
+                            }
+                        } else {
+                            swal({
+                                title: "Oops",
+                                text: "Too long",
+                                icon: "error"
+                            });
+                        }
+                    }
+                }
+            });
+            emojiSearch.addEventListener("keyup", function (e) {
+                if (this.value === "") {
+                    while (emojis.firstChild) {
+                        emojis.removeChild(emojis.firstChild);
+                    }
+                    const fragment = document.createDocumentFragment();
+                    for (let [key, emoji] of client.emojis) {
+                        const div = document.createElement("div");
+                        div.classList.add("emoji");
+                        div.style.backgroundImage = `url("/emojis/${emoji.id}")`;
+                        div.addEventListener("mouseover", () => {
+                            emojiSearch.placeholder = `:${key}:`;
+                        });
+                        div.addEventListener("click", () => {
+                            textarea.value += `:${key}: `;
+                            textarea.focus();
+                            textarea.selectionStart = textarea.value.length;
+                        });
+                        fragment.appendChild(div);
+                    }
+                    emojis.appendChild(fragment);
+                } else {
+                    while (emojis.firstChild) {
+                        emojis.removeChild(emojis.firstChild);
+                    }
+                    if (client.emojis.size > 0) {
+                        const fragment = document.createDocumentFragment();
+                        for (let [key, emoji] of client.emojis) {
+                            if (key.toLowerCase().includes(this.value.toLowerCase())) {
+                                const div = document.createElement("div");
+                                div.classList.add("emoji");
+                                div.style.backgroundImage = `url("/emojis/${emoji.id}")`;
+                                div.addEventListener("mouseover", () => {
+                                    emojiSearch.placeholder = `:${key}:`;
+                                });
+                                div.addEventListener("click", () => {
+                                    textarea.value += `:${key}: `;
+                                    textarea.focus();
+                                    textarea.selectionStart = textarea.value.length;
+                                });
+                                fragment.appendChild(div);
+                            }
+                        }
+                        emojis.appendChild(fragment);
+                    }
+                }
+            });
+            document.getElementById("emoji-picker-open").addEventListener("click", () => {
+                setTimeout(() => {
+                    emojiSearch.focus();
+                }, 0);
+                if (client.emojis.size > 0) {
+                    while (emojis.firstChild) {
+                        emojis.removeChild(emojis.firstChild);
+                    }
+                    const fragment = document.createDocumentFragment();
+                    for (let [key, emoji] of client.emojis) {
+                        const div = document.createElement("div");
+                        div.classList.add("emoji");
+                        div.style.backgroundImage = `url("/emojis/${emoji.id}")`;
+                        div.addEventListener("mouseover", () => {
+                            emojiSearch.placeholder = `:${key}:`;
+                        });
+                        div.addEventListener("click", () => {
+                            textarea.value += `:${key}: `;
+                            textarea.focus();
+                            textarea.selectionStart = textarea.value.length;
+                        });
+                        fragment.appendChild(div);
+                    }
+                    emojis.appendChild(fragment);
+                }
+                emojiPicker.style.display = "block";
+                setTimeout(() => {
+                    display.emojiPicker = true;
+                }, 300);
+            });
+            document.getElementById("add-friend-form").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const username = this.getElementsByTagName("input")[0].value;
+                if (/^.{1,64}#[0-9]{4}$/.test(username) && username.split("#").length === 2) {
+                    this.getElementsByTagName("input")[0].value = "";
+                    this.getElementsByTagName("input")[0].blur();
+                    try {
+                        await Http.post("/users/friend", JSON.stringify({
+                            username: username
+                        }));
+                        swal({
+                            title: "Success",
+                            text: "Friend request sent",
+                            icon: "success"
+                        });
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    swal({
+                        title: "Oops",
+                        text: "Invalid username or tag",
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("search-friends-form").addEventListener("submit", function (e) {
+                e.preventDefault();
+                const input = this.getElementsByTagName("input")[0];
+                const username = input.value.toLowerCase();
+                changeFocus(showChannels, showPending);
+                if (username.length > 0) {
+                    while (search.firstChild) {
+                        search.removeChild(search.firstChild);
+                    }
+                    if (username.length >= 1 && username.length <= 64) {
+                        const map = client.dmChannels;
+                        for (let [id, channel] of map) {
+                            if (id !== EVERYONE && channel.recipient.username.toLowerCase().includes(username)) {
+                                const div = document.createElement("div"); div.classList.add("channel");
+                                const img = document.createElement("div"); img.classList.add("avatar"); img.style.backgroundImage = `url("${channel.recipient.avatar}")`;
+                                const p = document.createElement("p"); p.textContent = channel.recipient.username;
+                                const span = document.createElement("span"); span.textContent = `#${channel.recipient.tag}`;
+                                p.appendChild(span);
+                                div.appendChild(img);
+                                div.appendChild(p);
+                                if (id === client.currentDMChannelId) {
+                                    div.classList.add("selected");
+                                }
+                                div.addEventListener("click", () => {
+                                    channel.change();
+                                    input.value = "";
+                                });
+                                search.appendChild(div);
+                            }
+                        }
+                        friends.style.display = "none";
+                        pending.style.display = "none";
+                        search.style.display = "block";
+                    }
+                } else {
+                    while (search.firstChild) {
+                        search.removeChild(search.firstChild);
+                    }
+                    search.style.display = "none";
+                    pending.style.display = "none";
+                    friends.style.display = "block";
+                }
+            });
+            document.getElementById("guild-add").addEventListener("click", () => {
+                prompt.classList.remove("popout");
+                prompt.classList.add("pop");
+                setTimeout(() => {
+                    display.prompt = true;
+                }, 300);
+            });
+            document.getElementById("btn-create-guild").addEventListener("click", () => {
+                document.getElementById("action-create-guild").style.display = "block";
+                choose.classList.remove("slideright");
+                action.classList.remove("slideright");
+                choose.classList.add("slideleft");
+                action.classList.add("slideleft");
+            });
+            document.getElementById("btn-join-guild").addEventListener("click", () => {
+                document.getElementById("action-join-guild").style.display = "block";
+                choose.classList.remove("slideright");
+                action.classList.remove("slideright");
+                choose.classList.add("slideleft");
+                action.classList.add("slideleft");
+            });
+            document.getElementById("choose-icon").addEventListener("change", function () {
+                const file = this.files[this.files.length - 1];
+                if (uploadable.includes(file.type)) {
+                    if (file.size < 2e6) {
+                        const reader = new FileReader();
+                        const submit = document.getElementsByTagName("form")[2].getElementsByTagName("button")[0];
+                        const icon = document.getElementsByClassName("icon")[0];
+                        reader.addEventListener("loadstart", () => {
+                            this.setAttribute("disabled", "disabled");
+                            submit.setAttribute("disabled", "disabled");
+                        });
+                        reader.addEventListener("load", async () => {
+                            fileContent = reader.result;
+                            this.removeAttribute("disabled");
+                            submit.removeAttribute("disabled");
+                            icon.style.backgroundImage = `url("${reader.result}")`;
+                        });
+                        reader.readAsDataURL(file);
+                    } else {
+                        this.value = "";
+                    }
+                } else {
+                    this.value = "";
+                }
+            });
+            document.getElementById("new-guild").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const name = this.getElementsByTagName("input")[1].value;
+                const errorMessage = this.getElementsByClassName("error")[0];
+                if (name.length >= 1 && name.length <= 64) {
+                    submit.setAttribute("disabled", "disabled");
+                    try {
+                        await Http.post("/new/guild", JSON.stringify({
+                            name: name,
+                            file: fileContent
+                        }));
+                        fileContent = null;
+                        this.getElementsByTagName("input")[0].value = "";
+                        this.getElementsByTagName("input")[1].value = "";
+                        submit.removeAttribute("disabled");
+                        document.getElementsByClassName("icon")[0].style.backgroundImage = "";
+                        prompt.classList.replace("pop", "popout");
+                        setTimeout(() => {
+                            display.prompt = false;
+                            resetPrompt();
+                        }, 300);
+                    } catch (error) {
+                        this.getElementsByTagName("input")[0].value = "";
+                        submit.removeAttribute("disabled");
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    errorMessage.textContent = "Enter a name between 1 and 64 characters";
+                    setTimeout(() => {
+                        errorMessage.textContent = "";
+                    }, 2000);
+                }
+            });
+            document.getElementById("join-guild").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const invite = this.getElementsByTagName("input")[0].value;
+                const errorMessage = this.getElementsByClassName("error")[0];
+                if (/^[a-zA-Z0-9]+$/.test(invite)) {
+                    submit.setAttribute("disabled", "disabled");
+                    try {
+                        await Http.post("/invites/join", JSON.stringify({
+                            invite: invite
+                        }));
+                        this.getElementsByTagName("input")[0].value = "";
+                        submit.removeAttribute("disabled");
+                        prompt.classList.replace("pop", "popout");
+                        setTimeout(() => {
+                            display.prompt = false;
+                            resetPrompt();
+                        }, 300);
+                    } catch (error) {
+                        submit.removeAttribute("disabled");
+                        errorMessage.textContent = error;
+                        setTimeout(() => {
+                            errorMessage.textContent = "";
+                        }, 2000);
+                    }
+                } else {
+                    submit.removeAttribute("disabled");
+                    errorMessage.textContent = "Invalid invite";
+                    setTimeout(() => {
+                        errorMessage.textContent = "";
+                    }, 2000);
+                }
+            });
+            document.getElementById("create-channel-form").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const name = this.getElementsByTagName("input")[0].value;
+                if (name.length >= 1 && name.length <= 64) {
+                    submit.setAttribute("disabled", "disabled");
+                    try {
+                        await Http.post(`/guilds/${client.currentGuildId}/channel/new`, JSON.stringify({
+                            name: name
+                        }));
+                        this.getElementsByTagName("input")[0].value = "";
+                        submit.removeAttribute("disabled");
+                        createChannel.classList.replace("pop", "popout");
+                    } catch (error) {
+                        submit.removeAttribute("disabled");
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+            });
+            document.getElementById("btn-about").addEventListener("click", function () {
+                for (let btn of control.getElementsByClassName("selected")) {
+                    btn.classList.remove("selected");
+                }
+                this.classList.add("selected");
+                document.getElementById("invites").style.display = "none";
+                document.getElementById("emojis").style.display = "none";
+                document.getElementById("about").style.display = "block";
+            });
+            document.getElementById("btn-emojis").addEventListener("click", function () {
+                for (let btn of control.getElementsByClassName("selected")) {
+                    btn.classList.remove("selected");
+                }
+                this.classList.add("selected");
+                document.getElementById("about").style.display = "none";
+                document.getElementById("invites").style.display = "none";
+                document.getElementById("emojis").style.display = "block";
+            });
+            document.getElementById("btn-invites").addEventListener("click", async function () {
+                for (let btn of control.getElementsByClassName("selected")) {
+                    btn.classList.remove("selected");
+                }
+                this.classList.add("selected");
+                document.getElementById("about").style.display = "none";
+                document.getElementById("emojis").style.display = "none";
+                document.getElementById("invites").style.display = "block";
+                if (!invites.hasChildNodes()) {
+                    try {
+                        const response = await Http.post("/invites/get", JSON.stringify({
+                            guild_id: client.currentGuildId
+                        }));
+                        const fragment = document.createDocumentFragment();
+                        for (let invite of response.invites) {
+                            const div = document.createElement("div"); div.classList.add("invite");
+                            const p = document.createElement("p"); p.textContent = invite;
+                            const button = document.createElement("button");
+                            button.addEventListener("click", async () => {
+                                try {
+                                    await Http.post("/invites/delete", JSON.stringify({
+                                        invite: invite
+                                    }));
+                                    invites.removeChild(div);
+                                } catch (error) {
+                                    swal({
+                                        title: "Oops",
+                                        text: error,
+                                        icon: "error"
+                                    });
+                                }
+                            });
+                            div.appendChild(p);
+                            div.appendChild(button);
+                            fragment.appendChild(div);
+                        }
+                        invites.appendChild(fragment);
+                    } catch (error) {
+                        swal({
+                            title: "Oops",
+                            text: error,
+                            icon: "error"
+                        });
+                    }
+                }
+            });
+            document.getElementById("delete-guild").addEventListener("click", () => {
+                swal({
+                    title: "Confirm?",
+                    text: `Are you sure you want to permanently delete ${client.guilds.get(client.currentGuildId).name}? This will remove all history associated with it.`,
+                    icon: "warning",
+                    buttons: true,
+                    dangerMode: true
+                }).then(async ok => {
+                    if (ok) {
+                        try {
+                            await Http.post(`/guilds/${client.currentGuildId}/delete`, null);
+                            swal({
+                                title: "Success",
+                                text: "Community deleted!",
+                                icon: "success"
+                            });
+                        } catch (error) {
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    }
+                });
+            });
+            document.getElementById("update-guild").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const name = this.getElementsByTagName("input")[0].value;
+                if (name !== client.guilds.get(client.currentGuildId).name) {
+                    if (name.length >= 1 && name.length <= 64) {
+                        try {
+                            await Http.post(`/guilds/${client.currentGuildId}/update`, JSON.stringify({
+                                name: name
+                            }));
+                            swal({
+                                title: "Success",
+                                text: "Community information updated",
+                                icon: "success"
+                            });
+                        } catch (error) {
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    } else {
+                        swal({
+                            title: "Oops",
+                            text: "Name must be between 1 - 64 characters",
+                            icon: "error"
+                        });
+                    }
+                }
+            });
+            document.getElementById("upload-icon").addEventListener("change", async function () {
+                const file = this.files[this.files.length - 1];
+                if (uploadable.includes(file.type)) {
+                    if (file.size < 2e6) {
+                        const icon = control.getElementsByClassName("icon")[0];
+                        const reader = new FileReader();
+                        reader.addEventListener("loadstart", () => {
+                            icon.style.backgroundImage = `url("/assets/loading.gif")`;
+                        });
+                        reader.addEventListener("load", async () => {
+                            this.setAttribute("disabled", "disabled");
+                            try {
+                                const response = await Http.post(`/guilds/${client.currentGuildId}/update`, JSON.stringify({
+                                    file: reader.result
+                                }));
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                icon.style.backgroundImage = `url("${response.icon}")`;
+                                swal({
+                                    title: "Success",
+                                    text: "Icon changed!",
+                                    icon: "success"
+                                });
+                            } catch (error) {
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                swal({
+                                    title: "Oops",
+                                    text: error,
+                                    icon: "error"
+                                });
+                            }
+                        });
+                        reader.readAsDataURL(file);
+                    } else {
+                        this.value = "";
+                        swal({
+                            title: "Oops",
+                            text: "Choose an image smaller than 2MB",
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    this.value = "";
+                    swal({
+                        title: "Oops",
+                        text: "Choose a JPG, PNG, or GIF image",
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("upload-emoji").addEventListener("change", async function () {
+                const file = this.files[this.files.length - 1];
+                if (uploadable.includes(file.type)) {
+                    if (file.size < 128e3) {
+                        const reader = new FileReader();
+                        reader.addEventListener("loadstart", () => {
+                            this.setAttribute("disabled", "disabled");
+                        });
+                        reader.addEventListener("load", async () => {
+                            try {
+                                const response = await Http.post(`/guilds/${client.currentGuildId}/emoji/new`, JSON.stringify({
+                                    file: reader.result,
+                                    name: file.name
+                                }));
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                const id = response.emoji.id;
+                                const div = document.createElement("div"); div.classList.add("emoji");
+                                const img = document.createElement("div"); img.classList.add("img"); img.style.backgroundImage = `url("/emojis/${response.emoji.id}")`;
+                                const input = document.createElement("input"); input.value = `${response.emoji.name}`;
+                                input.addEventListener("blur", async () => {
+                                    const name = input.value;
+                                    if (name.length > 0 && name !== response.emoji.name) {
+                                        try {
+                                            await Http.post(`/guilds/${client.currentGuildId}/emoji/${id}/update`, JSON.stringify({
+                                                name: name
+                                            }));
+                                            for (let [key, emoji] of client.emojis) {
+                                                if (emoji.id === id) {
+                                                    client.emojis.delete(key);
+                                                    client.emojis.set(client.createUniqueEmojiName(name), {
+                                                        id: id,
+                                                        name: name
+                                                    });
+                                                    break;
+                                                }
+                                            }
+                                            for (let emoji of client.guilds.get(client.currentGuildId).emojis) {
+                                                if (emoji.id === id) {
+                                                    emoji.name = name;
+                                                }
+                                            }
+                                        } catch (error) {
+                                            swal({
+                                                title: "Oops",
+                                                text: error,
+                                                icon: "error"
+                                            });
+                                        }
+                                    }
+                                });
+                                const button = document.createElement("button");
+                                button.addEventListener("click", async () => {
+                                    try {
+                                        await Http.post(`/guilds/${client.currentGuildId}/emoji/${id}/delete`, null);
+                                        emojisManager.removeChild(div);
+                                    } catch (error) {
+                                        swal({
+                                            title: "Oops",
+                                            text: error,
+                                            icon: "error"
+                                        });
+                                    }
+                                });
+                                div.appendChild(img);
+                                div.appendChild(input);
+                                div.appendChild(button);
+                                emojisManager.appendChild(div);
+                                swal({
+                                    title: "Success",
+                                    text: "Emoji uploaded!",
+                                    icon: "success"
+                                });
+                            } catch (error) {
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                swal({
+                                    title: "Oops",
+                                    text: error,
+                                    icon: "error"
+                                });
+                            }
+                        });
+                        reader.readAsDataURL(file);
+                    } else {
+                        this.value = "";
+                        swal({
+                            title: "Oops",
+                            text: "Choose an image smaller than 128KB",
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    this.value = "";
+                    swal({
+                        title: "Oops",
+                        text: "Choose a JPG, PNG, or GIF image",
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("create-invite").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                submit.setAttribute("disabled", "disabled");
+                try {
+                    const response = await Http.post("invites/new", JSON.stringify({
+                        guild_id: client.currentGuildId,
+                    }));
+                    const div = document.createElement("div"); div.classList.add("invite");
+                    const p = document.createElement("p"); p.textContent = response.invite;
+                    const button = document.createElement("button");
+                    button.addEventListener("click", async () => {
+                        try {
+                            await Http.post("invites/delete", JSON.stringify({
+                                invite: response.invite
+                            }));
+                            invites.removeChild(div);
+                        } catch (error) {
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    });
+                    div.appendChild(p);
+                    div.appendChild(button);
+                    invites.appendChild(div);
+                    submit.removeAttribute("disabled");
+                    swal({
+                        title: "Success",
+                        text: `Invite created: ${response.invite}`,
+                        icon: "success"
+                    });
+                } catch (error) {
+                    submit.removeAttribute("disabled");
+                    swal({
+                        title: "Oops",
+                        text: error,
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("upload-avatar").addEventListener("change", async function () {
+                const file = this.files[this.files.length - 1];
+                if (uploadable.includes(file.type)) {
+                    if (file.size < 2e6) {
+                        document.getElementById("delete-avatar").setAttribute("disabled", "disabled");
+                        const avatar = settings.getElementsByClassName("avatar")[0];
+                        const reader = new FileReader();
+                        reader.addEventListener("loadstart", () => {
+                            avatar.style.backgroundImage = `url("/assets/loading.gif")`;
+                        });
+                        reader.addEventListener("load", async () => {
+                            this.setAttribute("disabled", "disabled");
+                            try {
+                                const response = await Http.post("/upload/avatar", JSON.stringify({
+                                    file: reader.result
+                                }));
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                avatar.style.backgroundImage = `url("${response.avatar}")`;
+                                document.getElementsByTagName("nav")[0].getElementsByClassName("avatar")[0].style.backgroundImage = `url("${response.avatar}")`;
+                                document.getElementById("delete-avatar").removeAttribute("disabled");
+                                swal({
+                                    title: "Success",
+                                    text: "Avatar changed!",
+                                    icon: "success"
+                                });
+                            } catch (error) {
+                                this.value = "";
+                                this.removeAttribute("disabled");
+                                swal({
+                                    title: "Oops",
+                                    text: error,
+                                    icon: "error"
+                                });
+                            }
+                        });
+                        reader.readAsDataURL(file);
+                    } else {
+                        this.value = "";
+                        swal({
+                            title: "Oops",
+                            text: "Choose an image smaller than 2MB",
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    this.value = "";
+                    swal({
+                        title: "Oops",
+                        text: "Choose a JPG, PNG, or GIF image",
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("delete-avatar").addEventListener("click", () => {
+                swal({
+                    title: "Confirm?",
+                    text: "Are you sure you want to delete your avatar?",
+                    icon: "warning",
+                    buttons: true,
+                    dangerMode: true
+                }).then(async ok => {
+                    if (ok) {
+                        try {
+                            await Http.post("/upload/avatar", null);
+                            settings.getElementsByClassName("avatar")[0].style.backgroundImage = `url("/avatars/default.jpg")`;
+                            document.getElementsByTagName("nav")[0].getElementsByClassName("avatar")[0].style.backgroundImage = `url("/avatars/default.jpg")`;
+                            swal({
+                                title: "Success",
+                                text: "Avatar deleted!",
+                                icon: "success"
+                            });
+                        } catch (error) {
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    }
+                });
+            });
+            document.getElementById("change-username-form").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const username = this.getElementsByTagName("input")[0].value;
+                const tag = this.getElementsByTagName("input")[1].value;
+                const password = this.getElementsByTagName("input")[2].value;
+                if (username.length >= 1 && username.length <= 64) {
+                    if (!username.includes("#")) {
+                        if (/^[0-9]{4}$/.test(tag)) {
+                            if (password.length >= 8) {
+                                submit.setAttribute("disabled", "disabled");
+                                try {
+                                    await Http.post("/change/username", JSON.stringify({
+                                        username: username,
+                                        tag: tag,
+                                        password: password
+                                    }));
+                                    this.getElementsByTagName("input")[0].value = "";
+                                    this.getElementsByTagName("input")[2].value = "";
+                                    document.getElementById("username").textContent = `${username}#${tag}`;
+                                    submit.removeAttribute("disabled");
+                                    swal({
+                                        title: "Success",
+                                        text: "Username/tag changed!",
+                                        icon: "success"
+                                    });
+                                } catch (error) {
+                                    submit.removeAttribute("disabled");
+                                    swal({
+                                        title: "Oops",
+                                        text: error,
+                                        icon: "error"
+                                    });
+                                }
+                            } else {
+                                swal({
+                                    title: "Oops",
+                                    text: "Wrong password",
+                                    icon: "error"
+                                });
+                            }
+                        } else {
+                            swal({
+                                title: "Oops",
+                                text: "Invalid tag",
+                                icon: "error"
+                            });
+                        }
+                    } else {
+                        swal({
+                            title: "Oops",
+                            text: "Username contains invalid characters",
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    swal({
+                        title: "Oops",
+                        text: "Username must be between 1 - 64 characters",
+                        icon: "error",
+                    });
+                }
+            });
+            document.getElementById("change-password-form").addEventListener("submit", async function (e) {
+                e.preventDefault();
+                const submit = this.getElementsByTagName("button")[0];
+                const current = this.getElementsByTagName("input")[0].value;
+                const password = this.getElementsByTagName("input")[1].value;
+                const verify = this.getElementsByTagName("input")[2].value;
+                if (current.length >= 8) {
+                    if (password.length >= 8) {
+                        if (password === verify) {
+                            submit.setAttribute("disabled", "disabled");
+                            try {
+                                await Http.post("/change/password", JSON.stringify({
+                                    current: current,
+                                    password: password,
+                                    verify: verify
+                                }));
+                                for (let i = 0; i < 3; i++) {
+                                    this.getElementsByTagName("input")[i].value = "";
+                                }
+                                submit.removeAttribute("disabled");
+                                swal({
+                                    title: "Success",
+                                    text: "Password changed",
+                                    icon: "success"
+                                });
+                            } catch (error) {
+                                submit.removeAttribute("disabled");
+                                swal({
+                                    title: "Oops",
+                                    text: error,
+                                    icon: "error"
+                                });
+                            }
+                        } else {
+                            swal({
+                                title: "Oops",
+                                text: "Passwords don't match",
+                                icon: "error"
+                            });
+                        }
+                    } else {
+                        swal({
+                            title: "Oops",
+                            text: "Password must have at least 8 characters",
+                            icon: "error"
+                        });
+                    }
+                } else {
+                    swal({
+                        title: "Oops",
+                        text: "Wrong password",
+                        icon: "error"
+                    });
+                }
+            });
+            document.getElementById("logout").addEventListener("click", () => {
+                swal({
+                    title: "Confirm?",
+                    text: "Are you sure you want to log out?",
+                    icon: "warning",
+                    buttons: true,
+                    dangerMode: true
+                }).then(async ok => {
+                    if (ok) {
+                        try {
+                            await Http.get("/logout");
+                            window.location = "/";
+                        } catch (error) {
+                            swal({
+                                title: "Oops",
+                                text: error,
+                                icon: "error"
+                            });
+                        }
+                    }
+                });
+            });
+            document.getElementById("change-theme").addEventListener("click", () => {
+                if (stylesheet.getAttribute("href") === "/assets/index.css") {
+                    stylesheet.setAttribute("href", "/assets/night.css");
+                    window.localStorage.setItem("night", 1);
+                } else {
+                    stylesheet.setAttribute("href", "/assets/index.css");
+                    window.localStorage.removeItem("night");
+                }
+            });
+            document.addEventListener("click", async function (e) {
+                const element = e.target;
+                if (element === click) {
+                    if (!display.menu) {
+                        menu.style.display = "block";
+                        display.menu = true;
+                    } else {
+                        menu.style.display = "none";
+                        display.menu = false;
+                    }
+                } else if (display.menu) {
+                    if (element.id === "btn-settings") {
+                        settings.classList.remove("popout");
+                        settings.classList.add("pop");
+                        menu.style.display = "none";
+                        display.menu = false;
+                    } else if (element !== menu && element.parentNode !== menu) {
+                        menu.style.display = "none";
+                        display.menu = false;
+                    }
+                }
+                if (element.classList.contains("splash")) {
+                    splash.getElementsByTagName("p")[0].textContent = element.textContent;
+                    splash.getElementsByClassName("avatar")[0].style.backgroundImage = element.parentNode.parentNode.getElementsByClassName("avatar")[0].style.backgroundImage;
+                    splash.classList.remove("popout");
+                    splash.classList.add("pop");
+                    setTimeout(() => {
+                        display.splash = true;
+                    }, 300);
+                } else if (element.classList.contains("btn-create-channel")) {
+                    document.getElementById("create-channel").classList.remove("popout");
+                    document.getElementById("create-channel").classList.add("pop");
+                    setTimeout(() => {
+                        display.createChannel = true;
+                    });
+                } else if (element.classList.contains("close")) {
+                    control.classList.remove("pop");
+                    control.classList.add("popout");
+                    settings.classList.remove("pop");
+                    settings.classList.add("popout");
+                }
+                if (display.splash) {
+                    if (!splash.getElementsByTagName("div")[0].contains(element)) {
+                        splash.classList.replace("pop", "popout");
+                        setTimeout(() => {
+                            display.splash = false;
+                        }, 300);
+                    }
+                } else if (display.prompt) {
+                    if (element.classList.contains("back")) {
+                        resetPrompt();
+                    } else if (!prompt.getElementsByTagName("div")[0].contains(element)) {
+                        prompt.classList.replace("pop", "popout");
+                        setTimeout(() => {
+                            display.prompt = false;
+                            resetPrompt();
+                        }, 300);
+                    }
+                } else if (display.createChannel) {
+                    if (!createChannel.getElementsByTagName("div")[0].contains(element)) {
+                        createChannel.classList.replace("pop", "popout");
+                        setTimeout(() => {
+                            display.createChannel = false;
+                        }, 300);
+                    }
+                } else if (display.emojiPicker) {
+                    if (!emojiPicker.contains(element)) {
+                        emojiPicker.style.display = "none";
+                        setTimeout(() => {
+                            display.emojiPicker = false;
+                        }, 300);
+                    }
+                }
+                if (element === showChannels) {
+                    channelsIndicator.style.opacity = "0";
+                    changeFocus(showChannels, showPending);
+                    pending.style.display = "none";
+                    search.style.display = "none";
+                    friends.style.display = "block";
+                } else if (element === showPending) {
+                    pendingIndicator.style.opacity = "0";
+                    changeFocus(showPending, showChannels);
+                    friends.style.display = "none";
+                    search.style.display = "none";
+                    pending.style.display = "block";
+                }
+            });
+            document.addEventListener("keydown", e => {
+                if (e.key === "Escape" && (control.classList.contains("pop") || settings.classList.contains("pop"))) {
+                    control.classList.replace("pop", "popout");
+                    settings.classList.replace("pop", "popout");
+                }
+            });
+        });
+    })();
+    </script>
+</head>
+<body onbeforeunload="">
+    <audio id="audio" preload="auto">
+        <source src="/assets/notification.m4a" type="audio/mpeg" />
+    </audio>
+    <nav>
+        <div class="avatar"></div>
+    </nav>
+    <ul id="menu">
+        <hr>
+        <li><p id="btn-settings">Settings</p></li>
+        <li><p id="logout">Logout</p></li>
+        <hr>
+        <div class="separator"></div>
+        <hr>
+        <li><p id="change-theme">Change theme</p></li>
+        <hr>
+    </ul>
+    <div id="channels">
+        <div id="dm">
+            <div id="add-friend">
+                <form autocomplete="" id="add-friend-form">
+                    <input type="text" maxlength="69" placeholder="Add friend: example#0000">
+                    <input type="submit">
+                </form>
+            </div>
+            <div id="search-friends">
+                <form autocomplete="" id="search-friends-form">
+                    <input type="text" maxlength="64" placeholder="Search friends list by username (enter)">
+                    <input type="submit">
+                </form>
+            </div>
+            <div id="show">
+                <div class="show">
+                    <div class="dot"></div>
+                    <button type="button" class="focus">Friends</button>
+                </div>&nbsp;
+                <div class="show">
+                    <div class="dot"></div>
+                    <button type="button" class="focusout">Pending</button>
+                </div>
+            </div>
+            <div id="friends">
+                <div class="channel selected" id="dm-everyone">
+                    <p>@everyone</p>
+                    <div class="dot"></div>
+                </div>
+            </div>
+            <div id="pending"></div>
+            <div id="search"></div>
+        </div>
+        <div id="guild">
+            <div id="collections"></div>
+        </div>
+    </div>
+    <div id="chat">
+        <div id="messages">
+            <div id="chat-everyone"></div>
+        </div>
+        <div id="loading"></div>
+        <div id="messagebox">
+            <textarea type="text" placeholder="Message @everyone"></textarea>
+            <div id="emoji-picker-open"></div>
+            <div id="emoji-picker">
+                <div>
+                    <input type="text" placeholder="" id="emoji-search">
+                </div>
+                <div></div>
+            </div>
+        </div>
+    </div>
+    <div id="guilds">
+        <div class="guild selected" id="guild-dm"></div>
+        <div class="separator"></div>
+        <div class="guild" id="guild-add">
+            <p>+</p>
+        </div>
+    </div>
+    <div id="splash">
+        <div>
+            <div class="avatar"></div>
+            <p></p>
+        </div>
+    </div>
+    <div id="prompt">
+        <div>
+            <div id="choose">
+                <h1>CREATE OR JOIN A COMMUNITY</h1>
+                <div>
+                    <div class="choose" id="btn-create-guild">
+                        <h3>CREATE</h3>
+                        <p>Create a new community and invite your friends!</p>
+                        <div></div>
+                        <button>Create</button>
+                    </div>
+                    <div class="choose" id="btn-join-guild">
+                        <h3>JOIN</h3>
+                        <p>Enter an invite code and join a community.</p>
+                        <div></div>
+                        <button>Join</button>
+                    </div>
+                </div>
+            </div>
+            <div id="action">
+                <div class="action" id="action-create-guild">
+                    <h1>CREATE YOUR COMMUNITY</h1>
+                    <h3>Get access to text chat and custom emojis to use amongst your friends.</h3>
+                    <form autocomplete="" id="new-guild">
+                        <div class="icon">
+                            <label for="choose-icon">
+                                <p>COMMUNITY ICON</p>
+                            </label>
+                        </div>
+                        <input type="file" accept="image/*" id="choose-icon">
+                        <p>Community Name</p>
+                        <input type="name" maxlength="64" placeholder="Enter a community name">
+                        <hr>
+                        <p class="error"></p>
+                        <button type="submit">Create</button>
+                        <p class="description">Upload a JPG, PNG, or GIF for your community icon.
+                            <br/>
+                            <span>Maximum size 2MB</span>
+                        </p>
+                        <p class="note">A community is not subject to any rules and will NOT be deleted by us for any reason.</p>
+                    </form>
+                    <div>
+                        <button class="back">← BACK</button>
+                    </div>
+                </div>
+                <div class="action" id="action-join-guild">
+                    <h1>JOIN THIS COMMUNITY</h1>
+                    <h3>Enter an invite code or link to join an existing community.</h3>
+                    <form autocomplete="" id="join-guild">
+                        <p>Invite Code</p>
+                        <hr>
+                        <input type="text" placeholder="Enter your invite code">
+                        <hr>
+                        <p class="error"></p>
+                        <button type="submit">Join</button>
+                    </form>
+                    <div>
+                        <button class="back">← BACK</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="create-channel">
+        <div>
+            <form autocomplete="" id="create-channel-form">
+                <input type="text" maxlength="64" placeholder="Channel name">
+                <hr>
+                <hr>
+                <button type="submit">Create</button>
+            </form>
+        </div>
+    </div>
+    <div id="control">
+        <button class="close">&#10005;</button>
+        <h6>ESC</h6>
+        <div class="options">
+            <div>
+                <h1>OPTIONS</h1>
+                <button class="selected" id="btn-about">About</button>
+                <button id="btn-emojis">Emojis</button>
+                <button id="btn-invites">Invites</button>
+                <button id="delete-guild">Delete Community</button>
+            </div>
+        </div>
+        <div id="overview">
+            <div class="panel" id="about">
+                <div class="icon">
+                    <label for="upload-icon">
+                        <p>CHANGE ICON</p>
+                    </label>
+                </div>
+                <input type="file" accept="image/*" id="upload-icon">
+                <p class="description">Upload a JPG, PNG, or GIF for your community icon.
+                    <br/>
+                    <span>Maximum size: 2MB</span>
+                </p>
+                <div class="change">
+                    <h1>COMMUNITY NAME</h1>
+                    <form autocomplete="" id="update-guild">
+                        <input type="text" placeholder="Community name">
+                        <button type="submit">Save</button>
+                    </form>
+                </div>
+            </div>
+            <div class="panel" id="emojis">
+                <div>
+                    <h1>EMOJIS</h1>
+                    <h3>Upload an emoji usable by everyone in your community by name, and everyone else by ID. The name of the
+                        file is set as the emoji name. Maximum size 128KB.</h3>
+                    <hr>
+                    <label for="upload-emoji">Upload Emoji</label>
+                    <input type="file" accept="image/*" id="upload-emoji">
+                </div>
+                <div></div>
+            </div>
+            <div class="panel" id="invites">
+                <div>
+                    <h1>INVITES</h1>
+                    <h3>Active invites for your community. Users can join your community by entering an invite code.</h3>
+                    <hr>
+                    <form autocomplete="" id="create-invite">
+                        <button type="submit">Create</button>
+                    </form>
+                </div>
+                <div></div>
+            </div>
+        </div>
+    </div>
+    <div id="settings">
+        <button class="close">&#10005;</button>
+        <h6>ESC</h6>
+        <div class="options">
+            <div>
+                <h1>OPTIONS</h1>
+                <button class="selected">Account</button>
+            </div>
+        </div>
+        <div id="account">
+            <div>
+                <div id="me">
+                    <h1>MY ACCOUNT</h1>
+                    <div id="info">
+                        <div class="avatar">
+                            <label for="upload-avatar">
+                                <p>CHANGE AVATAR</p>
+                            </label>
+                        </div>
+                        <input type="file" accept="image/*" id="upload-avatar">
+                        <button id="delete-avatar">Delete Avatar</button>
+                        <div class="section">
+                            <h5>USERNAME</h5>
+                            <p id="username"></p>
+                        </div>
+                        <hr>
+                        <div class="section">
+                            <h5>EMAIL</h5>
+                            <p id="email"></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="change" id="change-username">
+                    <h1>CHANGE USERNAME</h1>
+                    <form autocomplete="" id="change-username-form">
+                        <input type="text" maxlength="64" placeholder="Username">&nbsp;<input type="text" maxlength="4" placeholder="0000">
+                        <hr>
+                        <hr>
+                        <input type="password" placeholder="Password">
+                        <hr>
+                        <hr>
+                        <button type="submit">Change Username</button>
+                    </form>
+                </div>
+                <div class="change" id="change-password">
+                    <h1>CHANGE PASSWORD</h1>
+                    <form autocomplete="" id="change-password-form">
+                        <input type="password" placeholder="Current Password">
+                        <hr>
+                        <hr>
+                        <input type="password" placeholder="New Password">
+                        <hr>
+                        <hr>
+                        <input type="password" placeholder="Verify Password">
+                        <hr>
+                        <hr>
+                        <button type="submit">Change Password</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
